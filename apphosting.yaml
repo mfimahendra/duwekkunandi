@@ -1,0 +1,17 @@
+runConfig:
+  minInstances: 0
+  maxInstances: 1
+  concurrency: 40
+  cpu: 1
+  memoryMiB: 512
+
+env:
+  - variable: FIRESTORE_COLLECTION
+    value: transaksi
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: APP_PIN
+    secret: APP_PIN
+  - variable: APP_SECRET
+    secret: APP_SECRET
