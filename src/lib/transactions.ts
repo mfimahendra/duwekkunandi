@@ -32,12 +32,12 @@ const jamFmt = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Asia/Jakarta",
 });
 
-// Sheets time cells arrive as 1899-12-30 datetimes; keep only HH:mm.
+// Sheets time cells arrive as 1899-12-30 datetimes; keep only HH:mm, blank if no time.
 function toJam(value: unknown): string {
   const text = toText(value);
-  if (!/^1899-12-30[T ]/.test(text)) return text;
+  if (!text.startsWith("1899-12-30")) return text;
   const date = new Date(text);
-  return Number.isNaN(date.getTime()) ? text : jamFmt.format(date);
+  return /\d{2}:\d{2}/.test(text) && !Number.isNaN(date.getTime()) ? jamFmt.format(date) : "";
 }
 
 function sortTime(t: Transaction): number {
@@ -85,7 +85,8 @@ async function fetchFromSheet(): Promise<Transaction[]> {
 async function readSnapshotFile(): Promise<TransactionsSnapshot | null> {
   try {
     const parsed = JSON.parse(await readFile(SNAPSHOT_FILE, "utf8")) as TransactionsSnapshot;
-    return Array.isArray(parsed.data) ? parsed : null;
+    if (!Array.isArray(parsed.data)) return null;
+    return { ...parsed, data: parsed.data.map((t) => ({ ...t, jam: toJam(t.jam) })) };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;

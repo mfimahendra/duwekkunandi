@@ -143,15 +143,16 @@ export function DashboardView({
         </CardContent>
       </Card>
 
-      <section className="grid gap-3 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Pengeluaran per Kategori</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <KategoriChart data={view.chartKategori} />
-          </CardContent>
-        </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Pengeluaran per Kategori</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <KategoriChart data={view.chartKategori} />
+        </CardContent>
+      </Card>
+
+      <section className="grid gap-3">
         <Card>
           <CardHeader>
             <CardTitle>Pengeluaran per Bulan (semua data)</CardTitle>
