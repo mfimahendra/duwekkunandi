@@ -1,27 +1,18 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { readJson, writeJson } from "@/lib/storage";
 
 export type CategoryStore = {
   kategori: string[];
   penerima: Record<string, string>;
 };
 
-const STORE_FILE = path.join(process.cwd(), "data", "kategori.json");
-
 export async function readCategoryStore(): Promise<CategoryStore> {
-  try {
-    const parsed = JSON.parse(await readFile(STORE_FILE, "utf8"));
-    return {
-      kategori: Array.isArray(parsed.kategori) ? parsed.kategori : [],
-      penerima: parsed.penerima && typeof parsed.penerima === "object" ? parsed.penerima : {},
-    };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { kategori: [], penerima: {} };
-    throw error;
-  }
+  const parsed = await readJson<Partial<CategoryStore>>("kategori");
+  return {
+    kategori: Array.isArray(parsed?.kategori) ? parsed.kategori : [],
+    penerima: parsed?.penerima && typeof parsed.penerima === "object" ? parsed.penerima : {},
+  };
 }
 
 export async function writeCategoryStore(store: CategoryStore): Promise<void> {
-  await mkdir(path.dirname(STORE_FILE), { recursive: true });
-  await writeFile(STORE_FILE, JSON.stringify(store, null, 2), "utf8");
+  await writeJson("kategori", store);
 }

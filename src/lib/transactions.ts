@@ -1,6 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { unstable_cache } from "next/cache";
+import { readJson, writeJson } from "@/lib/storage";
 import type { Transaction } from "@/lib/types";
 
 export const TRANSAKSI_CACHE_TAG = "transaksi";
@@ -11,8 +10,6 @@ export type TransactionsSnapshot = {
 };
 
 type SheetError = { error: string };
-
-const SNAPSHOT_FILE = path.join(process.cwd(), "data", "transaksi.json");
 
 function toNumber(value: unknown): number {
   if (typeof value === "number") return value;
@@ -83,14 +80,9 @@ async function fetchFromSheet(): Promise<Transaction[]> {
 }
 
 async function readSnapshotFile(): Promise<TransactionsSnapshot | null> {
-  try {
-    const parsed = JSON.parse(await readFile(SNAPSHOT_FILE, "utf8")) as TransactionsSnapshot;
-    if (!Array.isArray(parsed.data)) return null;
-    return { ...parsed, data: parsed.data.map((t) => ({ ...t, jam: toJam(t.jam) })) };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
+  const parsed = await readJson<TransactionsSnapshot>("transaksi");
+  if (!parsed || !Array.isArray(parsed.data)) return null;
+  return { ...parsed, data: parsed.data.map((t) => ({ ...t, jam: toJam(t.jam) })) };
 }
 
 // Cache tanpa masa kedaluwarsa; hanya dihapus oleh updateTag saat Sync.
@@ -104,7 +96,6 @@ export async function syncFromSheet(): Promise<TransactionsSnapshot> {
     data: await fetchFromSheet(),
     fetchedAt: new Date().toISOString(),
   };
-  await mkdir(path.dirname(SNAPSHOT_FILE), { recursive: true });
-  await writeFile(SNAPSHOT_FILE, JSON.stringify(snapshot), "utf8");
+  await writeJson("transaksi", snapshot);
   return snapshot;
 }
