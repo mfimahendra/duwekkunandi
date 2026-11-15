@@ -19,6 +19,7 @@ import {
   inPeriode,
   resolvePeriode,
   resolveReferensi,
+  shiftBulan,
   todayIso,
 } from "@/lib/periode";
 import {
@@ -36,6 +37,8 @@ const fetchedAtFormat = new Intl.DateTimeFormat("id-ID", {
   timeStyle: "short",
   timeZone: "Asia/Jakarta",
 });
+
+const gajianFormat = new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
 
 function defaultFilter(): PeriodeState {
   return { mode: "tanggal", bulan: currentBulan(), gajian: 25, tanggal: todayIso() };
@@ -96,8 +99,6 @@ export function DashboardView({
       periode,
       periodeTx,
       excludedCount: periodeTx.length - pengeluaran.length,
-      totalNominal: pengeluaran.reduce((sum, t) => sum + t.nominal, 0),
-      totalBiaya: pengeluaran.reduce((sum, t) => sum + t.biaya, 0),
       totalKeseluruhan,
       referensiTotal,
       deltaPersen: referensiTotal > 0 ? ((totalKeseluruhan - referensiTotal) / referensiTotal) * 100 : null,
@@ -107,11 +108,32 @@ export function DashboardView({
     };
   }, [transactions, filter, owners]);
 
-  // Budget mengikuti rentang gajian (23/24/25) pada bulan periode yang dipilih.
-  const budgetPeriode = useMemo(
-    () => resolvePeriode({ mode: "gajian", bulan: view.periode.bulan, gajian: String(budgetGajian) }),
-    [view.periode.bulan, budgetGajian],
-  );
+  // Rata-rata harian periode berjalan dikalikan total hari periode; null jika periode belum mulai.
+  const proyeksi = useMemo(() => {
+    const today = todayIso();
+    const { start, end } = view.periode;
+    if (today < start) return null;
+    const hariDiff = (a: string, b: string) => Math.round((Date.parse(a) - Date.parse(b)) / 86_400_000);
+    const totalHari = hariDiff(end, start);
+    const berjalan = Math.min(hariDiff(today, start) + 1, totalHari);
+    return {
+      nominal: Math.round((view.totalKeseluruhan / berjalan) * totalHari),
+      rataRata: Math.round(view.totalKeseluruhan / berjalan),
+      berjalan,
+      totalHari,
+    };
+  }, [view]);
+
+  // Mode tanggal memakai periode gajian yang memuat tanggal tersebut; mode lain memakai bulan periode.
+  const budgetPeriode = useMemo(() => {
+    if (filter.mode === "tanggal") {
+      const tanggal = view.periode.start;
+      const day = Number(tanggal.slice(8, 10));
+      const bulan = day >= budgetGajian ? tanggal.slice(0, 7) : shiftBulan(tanggal.slice(0, 7), -1);
+      return resolvePeriode({ mode: "gajian", bulan, gajian: String(budgetGajian) });
+    }
+    return resolvePeriode({ mode: "gajian", bulan: view.periode.bulan, gajian: String(budgetGajian) });
+  }, [filter.mode, view.periode.start, view.periode.bulan, budgetGajian]);
   const budgetSpent = useMemo(
     () =>
       transactions
@@ -119,8 +141,8 @@ export function DashboardView({
         .reduce((sum, t) => sum + t.total, 0),
     [transactions, budgetPeriode, owners],
   );
-  // Batas aman per hari: sisa budget sebelum hari itu dibagi jumlah hari sampai gajian berikutnya.
-  const budgetAllowance = useMemo(() => {
+  // Fixed Budget dibagi rata ke seluruh hari periode; Batas Aman sisa budget dibagi sisa hari.
+  const budgetRows = useMemo(() => {
     const budget = budgets[budgetPeriode.start];
     const perTanggal = new Map<string, number>();
     for (const t of transactions) {
@@ -129,22 +151,52 @@ export function DashboardView({
       perTanggal.set(tanggal, (perTanggal.get(tanggal) ?? 0) + t.total);
     }
 
-    const allowance = new Map<string, number>();
+    const totalHari = Math.round((Date.parse(budgetPeriode.end) - Date.parse(budgetPeriode.start)) / 86_400_000);
+    const fixed = new Map<string, number>();
+    const aman = new Map<string, number>();
     if (budget !== undefined) {
       let terpakai = 0;
       for (let day = budgetPeriode.start; day < budgetPeriode.end; day = addDays(day, 1)) {
         const sisaHari = Math.round((Date.parse(budgetPeriode.end) - Date.parse(day)) / 86_400_000);
-        allowance.set(day, Math.max(0, Math.floor((budget - terpakai) / sisaHari)));
+        fixed.set(day, Math.floor(budget / totalHari));
+        aman.set(day, Math.max(0, Math.floor((budget - terpakai) / sisaHari)));
         terpakai += perTanggal.get(day) ?? 0;
       }
     }
 
-    const days: (number | null)[] = [];
+    const days: string[] = [];
     for (let day = view.periode.start; day < view.periode.end; day = addDays(day, 1)) {
-      days.push(allowance.get(day) ?? null);
+      days.push(day);
     }
-    return days;
+    return {
+      fixed: days.map((day) => fixed.get(day) ?? null),
+      aman: days.map((day) => aman.get(day) ?? null),
+    };
   }, [transactions, budgets, budgetPeriode, owners, view.periode.start, view.periode.end]);
+
+  // Sama dengan nilai batas aman harian pada tabel, khusus untuk hari ini.
+  const batasAmanHariIni = useMemo(() => {
+    const budget = budgets[budgetPeriode.start];
+    const today = todayIso();
+    if (budget === undefined || today < budgetPeriode.start || today >= budgetPeriode.end) return null;
+    const terpakai = transactions
+      .filter((t) => inPeriode(t, budgetPeriode) && isPengeluaran(t, owners) && t.tanggal.slice(0, 10) < today)
+      .reduce((sum, t) => sum + t.total, 0);
+    const sisaHari = Math.round((Date.parse(budgetPeriode.end) - Date.parse(today)) / 86_400_000);
+    return Math.max(0, Math.floor((budget - terpakai) / sisaHari));
+  }, [transactions, budgets, budgetPeriode, owners]);
+
+  // Gajian berikutnya dihitung dari hari ini; tanggal gajian sama dengan hari ini berarti bulan depan.
+  const gajianBerikutnya = useMemo(() => {
+    const today = todayIso();
+    const bulanIni = today.slice(0, 7);
+    const gajianBulanIni = resolvePeriode({ mode: "gajian", bulan: bulanIni, gajian: String(budgetGajian) }).start;
+    const tanggal =
+      gajianBulanIni > today
+        ? gajianBulanIni
+        : resolvePeriode({ mode: "gajian", bulan: shiftBulan(bulanIni, 1), gajian: String(budgetGajian) }).start;
+    return { tanggal, sisaHari: Math.round((Date.parse(tanggal) - Date.parse(today)) / 86_400_000) };
+  }, [budgetGajian]);
 
   // Elemen dengan referensi stabil dilewati React saat filter periode berubah.
   const bulanChart = useMemo(() => <BulananChart data={chartBulan} />, [chartBulan]);
@@ -211,18 +263,48 @@ export function DashboardView({
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Total Nominal</CardTitle>
+            <CardTitle>Gajian Berikutnya</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-base font-semibold text-slate-900 sm:text-xl">{rupiah.format(view.totalNominal)}</p>
+            <p className="text-base font-semibold text-slate-900 sm:text-xl">{gajianBerikutnya.sisaHari} hari lagi</p>
+            <p className="mt-1 text-xs text-slate-500 sm:text-sm">
+              {gajianFormat.format(new Date(`${gajianBerikutnya.tanggal}T00:00:00Z`))}
+            </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Total Biaya</CardTitle>
+            <CardTitle>Proyeksi Akhir Periode</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-base font-semibold text-slate-900 sm:text-xl">{rupiah.format(view.totalBiaya)}</p>
+            <p className="text-base font-semibold text-slate-900 sm:text-xl">
+              {proyeksi ? rupiah.format(proyeksi.nominal) : "—"}
+            </p>
+            {proyeksi && (
+              <p className="mt-1 text-xs text-slate-500 sm:text-sm">
+                Berdasarkan {proyeksi.berjalan} dari {proyeksi.totalHari} hari
+              </p>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Batas Aman Hari Ini</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-base font-semibold text-slate-900 sm:text-xl">
+              {batasAmanHariIni !== null ? rupiah.format(batasAmanHariIni) : "—"}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Rata-rata Pengeluaran Harian</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-base font-semibold text-slate-900 sm:text-xl">
+              {proyeksi ? rupiah.format(proyeksi.rataRata) : "—"}
+            </p>
           </CardContent>
         </Card>
       </section>
@@ -233,7 +315,12 @@ export function DashboardView({
         </CardHeader>
         <CardContent className="space-y-4">
           <HarianChart {...view.chartHarian} />
-          <HarianTable {...view.chartHarian} allowance={budgetAllowance} />
+          <HarianTable
+            labels={view.chartHarian.labels}
+            values={view.chartHarian.values}
+            fixedBudget={budgetRows.fixed}
+            batasAman={budgetRows.aman}
+          />
         </CardContent>
       </Card>
 

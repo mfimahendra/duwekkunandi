@@ -14,13 +14,13 @@ function heatColor(t: number): string {
 export function HarianTable({
   labels,
   values,
-  trend,
-  allowance,
+  fixedBudget,
+  batasAman,
 }: {
   labels: string[];
   values: number[];
-  trend: number[];
-  allowance: (number | null)[];
+  fixedBudget: (number | null)[];
+  batasAman: (number | null)[];
 }) {
   const max = Math.max(0, ...values);
 
@@ -40,19 +40,19 @@ export function HarianTable({
           </tr>
           <tr className="border-b border-slate-100">
             <th scope="row" className="sticky left-0 z-10 bg-white px-3 py-1.5 text-left font-medium text-slate-600">
-              Tren
+              Fixed Budget
             </th>
-            {trend.map((value, i) => (
+            {fixedBudget.map((value, i) => (
               <td key={labels[i] + i} className="whitespace-nowrap px-3 py-1.5 text-right text-slate-600">
-                {rupiah.format(value)}
+                {value === null ? "—" : rupiah.format(value)}
               </td>
             ))}
           </tr>
           <tr className="border-b border-slate-100">
             <th scope="row" className="sticky left-0 z-10 bg-white px-3 py-1.5 text-left font-medium text-slate-600">
-              Budget harian
+              Batas Aman Budget
             </th>
-            {allowance.map((value, i) => (
+            {batasAman.map((value, i) => (
               <td key={labels[i] + i} className="whitespace-nowrap px-3 py-1.5 text-right text-slate-600">
                 {value === null ? "—" : rupiah.format(value)}
               </td>
@@ -60,7 +60,7 @@ export function HarianTable({
           </tr>
           <tr>
             <th scope="row" className="sticky left-0 z-10 bg-white px-3 py-1.5 text-left font-medium text-slate-900">
-              Actual pengeluaran
+              Actual Pengeluaran
             </th>
             {values.map((value, i) => {
               const t = max > 0 ? value / max : 0;

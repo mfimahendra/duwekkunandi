@@ -13,7 +13,7 @@ export type PeriodeState = {
 
 const MODES: { value: Mode; label: string }[] = [
   { value: "bulan", label: "Bulan" },
-  { value: "gajian", label: "Bulan gajian" },
+  { value: "gajian", label: "Bulan Gajian" },
   { value: "tanggal", label: "Tanggal" },
 ];
 
