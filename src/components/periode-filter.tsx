@@ -8,14 +8,13 @@ export type PeriodeState = {
   mode: Mode;
   bulan: string;
   gajian: number;
-  dari: string;
-  sampai: string;
+  tanggal: string;
 };
 
 const MODES: { value: Mode; label: string }[] = [
   { value: "bulan", label: "Bulan" },
   { value: "gajian", label: "Bulan gajian" },
-  { value: "rentang", label: "Rentang tanggal" },
+  { value: "tanggal", label: "Tanggal" },
 ];
 
 export function PeriodeFilter({
@@ -50,7 +49,7 @@ export function PeriodeFilter({
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
-        {draft.mode !== "rentang" && (
+        {draft.mode !== "tanggal" && (
           <div className="w-full sm:w-56">
             <MonthField label="Bulan" value={draft.bulan} onChange={(bulan) => set({ bulan })} />
           </div>
@@ -76,15 +75,10 @@ export function PeriodeFilter({
           </div>
         )}
 
-        {draft.mode === "rentang" && (
-          <>
-            <div className="w-full sm:w-56">
-              <DateField label="Dari tanggal" value={draft.dari} onChange={(dari) => set({ dari })} />
-            </div>
-            <div className="w-full sm:w-56">
-              <DateField label="Sampai tanggal" value={draft.sampai} onChange={(sampai) => set({ sampai })} />
-            </div>
-          </>
+        {draft.mode === "tanggal" && (
+          <div className="w-full sm:w-56">
+            <DateField label="Tanggal" value={draft.tanggal} onChange={(tanggal) => set({ tanggal })} />
+          </div>
         )}
 
         <button

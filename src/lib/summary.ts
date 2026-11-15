@@ -20,25 +20,30 @@ export function normalizeName(value: string): string {
   return value.trim().replace(/\s+/g, " ").toUpperCase();
 }
 
-function ownerNames(): string[] {
-  return (process.env.OWNER_NAMES ?? "")
+// Dibaca di server lalu dikirim sebagai prop, agar hasil render server dan client sama.
+export function parseOwnerNames(raw: string | undefined): string[] {
+  return (raw ?? "")
     .split(",")
     .map(normalizeName)
     .filter((name) => name.length >= 3);
 }
 
-export function isSelfTransfer(penerima: string): boolean {
+export function isSelfTransfer(penerima: string, owners: string[]): boolean {
   const name = normalizeName(penerima);
   if (!name) return false;
-  return ownerNames().some((owner) => name.includes(owner));
+  return owners.some((owner) => name.includes(owner));
 }
 
-export function isPengeluaran(t: Transaction): boolean {
-  return !isSelfTransfer(t.penerima_penyedia) && t.kategori !== KATEGORI_PINDAH;
+export function isPengeluaran(t: Transaction, owners: string[]): boolean {
+  return !isSelfTransfer(t.penerima_penyedia, owners) && t.kategori !== KATEGORI_PINDAH;
 }
 
-export function resolveKategori(t: Transaction, mapping: CategoryStore["penerima"]): string {
-  if (isSelfTransfer(t.penerima_penyedia)) return KATEGORI_SENDIRI;
+export function resolveKategori(
+  t: Transaction,
+  mapping: CategoryStore["penerima"],
+  owners: string[],
+): string {
+  if (isSelfTransfer(t.penerima_penyedia, owners)) return KATEGORI_SENDIRI;
   const key = normalizeName(t.penerima_penyedia);
   return (key && mapping[key]) || KATEGORI_BELUM;
 }
@@ -50,11 +55,15 @@ function bulanKey(tanggal: string): string | null {
 
 const namaBulan = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
 
-export function buildPenerimaRows(transactions: Transaction[], mapping: CategoryStore["penerima"]): PenerimaRow[] {
+export function buildPenerimaRows(
+  transactions: Transaction[],
+  mapping: CategoryStore["penerima"],
+  owners: string[],
+): PenerimaRow[] {
   const groups = new Map<string, PenerimaRow>();
 
   for (const t of transactions) {
-    if (isSelfTransfer(t.penerima_penyedia)) continue;
+    if (isSelfTransfer(t.penerima_penyedia, owners)) continue;
     const key = normalizeName(t.penerima_penyedia);
     if (!key) continue;
 
@@ -76,10 +85,10 @@ export function buildPenerimaRows(transactions: Transaction[], mapping: Category
   });
 }
 
-export function buildChartKategori(transactions: Transaction[]): ChartKategori[] {
+export function buildChartKategori(transactions: Transaction[], owners: string[]): ChartKategori[] {
   const totals = new Map<string, number>();
   for (const t of transactions) {
-    if (!isPengeluaran(t)) continue;
+    if (!isPengeluaran(t, owners)) continue;
     totals.set(t.kategori || KATEGORI_BELUM, (totals.get(t.kategori || KATEGORI_BELUM) ?? 0) + t.total);
   }
   return [...totals.entries()]
@@ -87,10 +96,10 @@ export function buildChartKategori(transactions: Transaction[]): ChartKategori[]
     .sort((a, b) => b.y - a.y);
 }
 
-export function buildChartBulan(transactions: Transaction[]): ChartBulan[] {
+export function buildChartBulan(transactions: Transaction[], owners: string[]): ChartBulan[] {
   const totals = new Map<string, number>();
   for (const t of transactions) {
-    if (!isPengeluaran(t)) continue;
+    if (!isPengeluaran(t, owners)) continue;
     const key = bulanKey(t.tanggal);
     if (!key) continue;
     totals.set(key, (totals.get(key) ?? 0) + t.total);

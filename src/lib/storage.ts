@@ -1,8 +1,9 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const restUrl = process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
-const restToken = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
+const unquote = (value?: string) => value?.trim().replace(/^["']|["']$/g, "");
+const restUrl = unquote(process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL);
+const restToken = unquote(process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN);
 const useKv = Boolean(restUrl && restToken);
 
 function assertStorage(): void {
@@ -29,11 +30,22 @@ function localPath(name: string): string {
   return path.join(process.cwd(), "data", `${name}.json`);
 }
 
+// Last known good value per name; per serverless instance, lost on cold start.
+const memoryCache = new Map<string, string>();
+
 export async function readJson<T>(name: string): Promise<T | null> {
   assertStorage();
   if (useKv) {
-    const raw = await kvCommand(["GET", `duwek:${name}`]);
-    return typeof raw === "string" ? (JSON.parse(raw) as T) : null;
+    try {
+      const raw = await kvCommand(["GET", `duwek:${name}`]);
+      if (typeof raw !== "string") return null;
+      memoryCache.set(name, raw);
+      return JSON.parse(raw) as T;
+    } catch (error) {
+      const cached = memoryCache.get(name);
+      if (cached === undefined) throw error;
+      return JSON.parse(cached) as T;
+    }
   }
   try {
     return JSON.parse(await readFile(localPath(name), "utf8")) as T;
@@ -46,8 +58,14 @@ export async function readJson<T>(name: string): Promise<T | null> {
 export async function writeJson(name: string, value: unknown): Promise<void> {
   assertStorage();
   const raw = JSON.stringify(value);
+  memoryCache.set(name, raw);
   if (useKv) {
-    await kvCommand(["SET", `duwek:${name}`, raw]);
+    try {
+      await kvCommand(["SET", `duwek:${name}`, raw]);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "gagal";
+      throw new Error(`Tersimpan sementara di cache, belum permanen: ${reason}`);
+    }
     return;
   }
   await mkdir(path.dirname(localPath(name)), { recursive: true });

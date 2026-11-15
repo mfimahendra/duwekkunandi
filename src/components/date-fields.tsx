@@ -1,14 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
-import { DayPicker } from "react-day-picker";
-import { id } from "react-day-picker/locale";
-import "react-day-picker/style.css";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
+import { Calendar } from "@/components/ui/calendar";
 
 const triggerClass =
-  "flex h-10 w-full items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-left text-sm hover:bg-slate-50";
-const popoverClass = "absolute left-0 z-20 mt-1 rounded-xl border border-slate-200 bg-white p-2 shadow-lg";
+  "flex h-10 w-full items-center justify-start gap-2 rounded-md border border-slate-200 bg-white px-3 text-left text-sm font-normal text-slate-900 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400";
+const popoverClass = "absolute left-0 z-20 mt-1 rounded-md border border-slate-200 bg-white shadow-md";
 
 const dateFmt = new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short", year: "numeric" });
 const monthFmt = new Intl.DateTimeFormat("id-ID", { month: "long", year: "numeric" });
@@ -58,10 +56,8 @@ export function DateField({
         {dateFmt.format(selected)}
       </button>
       {open && (
-        <div className={`${popoverClass} w-72`}>
-          <DayPicker
-            mode="single"
-            locale={id}
+        <div className={popoverClass}>
+          <Calendar
             selected={selected}
             defaultMonth={selected}
             onSelect={(d) => {
@@ -69,7 +65,6 @@ export function DateField({
               onChange(toIsoDate(d));
               setOpen(false);
             }}
-            style={{ "--rdp-accent-color": "#0f172a" } as CSSProperties}
           />
         </div>
       )}

@@ -1,14 +1,26 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Minus, TrendingDown, TrendingUp } from "lucide-react";
+import { BudgetCard } from "@/components/budget-card";
 import { BulananChart, HarianChart, KategoriChart, TopKategoriChart } from "@/components/charts";
 import { CategoryManager } from "@/components/category-manager";
+import { HarianTable } from "@/components/harian-table";
 import { PeriodeFilter, type PeriodeState } from "@/components/periode-filter";
 import { TransactionList } from "@/components/transaction-list";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { CategoryStore } from "@/lib/categories";
 import { rupiah } from "@/lib/format";
-import { addDays, buildChartHarian, currentBulan, inPeriode, resolvePeriode } from "@/lib/periode";
+import {
+  REFERENSI_LABEL,
+  addDays,
+  buildChartHarian,
+  currentBulan,
+  inPeriode,
+  resolvePeriode,
+  resolveReferensi,
+  todayIso,
+} from "@/lib/periode";
 import {
   KATEGORI_BELUM,
   buildChartBulan,
@@ -26,54 +38,113 @@ const fetchedAtFormat = new Intl.DateTimeFormat("id-ID", {
 });
 
 function defaultFilter(): PeriodeState {
-  const bulan = currentBulan();
-  const periode = resolvePeriode({ mode: "bulan", bulan });
-  return { mode: "bulan", bulan, gajian: 25, dari: periode.start, sampai: addDays(periode.end, -1) };
+  return { mode: "tanggal", bulan: currentBulan(), gajian: 25, tanggal: todayIso() };
 }
 
 export function DashboardView({
   transactions: raw,
   fetchedAt,
   store,
+  owners,
+  budgets,
 }: {
   transactions: Transaction[];
   fetchedAt: string | null;
   store: CategoryStore;
+  owners: string[];
+  budgets: Record<string, number>;
 }) {
   const [filter, setFilter] = useState<PeriodeState>(defaultFilter);
+  const [budgetGajian, setBudgetGajian] = useState(25);
 
   // Tidak bergantung pada filter periode, jadi hanya dihitung ulang saat data berubah.
   const transactions = useMemo(
-    () => raw.map((t) => ({ ...t, kategori: resolveKategori(t, store.penerima) })),
-    [raw, store],
+    () => raw.map((t) => ({ ...t, kategori: resolveKategori(t, store.penerima, owners) })),
+    [raw, store, owners],
   );
-  const chartBulan = useMemo(() => buildChartBulan(transactions), [transactions]);
-  const penerimaRows = useMemo(() => buildPenerimaRows(transactions, store.penerima), [transactions, store]);
+  const chartBulan = useMemo(() => buildChartBulan(transactions, owners), [transactions, owners]);
+  const penerimaRows = useMemo(
+    () => buildPenerimaRows(transactions, store.penerima, owners),
+    [transactions, store, owners],
+  );
 
   const view = useMemo(() => {
     const periode = resolvePeriode({
       mode: filter.mode,
       bulan: filter.bulan,
       gajian: String(filter.gajian),
-      dari: filter.dari,
-      sampai: filter.sampai,
+      tanggal: filter.tanggal,
     });
     const periodeTx = transactions.filter((t) => inPeriode(t, periode));
-    const pengeluaran = periodeTx.filter(isPengeluaran);
+    const pengeluaran = periodeTx.filter((t) => isPengeluaran(t, owners));
 
-    const chartKategori = buildChartKategori(periodeTx);
+    const chartKategori = buildChartKategori(periodeTx, owners);
+
+    // Periode acuan untuk persentase perbandingan.
+    const referensi = resolveReferensi({
+      mode: filter.mode,
+      bulan: filter.bulan,
+      gajian: filter.gajian,
+      tanggal: filter.tanggal,
+    });
+    const referensiTotal = transactions
+      .filter((t) => inPeriode(t, referensi) && isPengeluaran(t, owners))
+      .reduce((sum, t) => sum + t.total, 0);
+    const totalKeseluruhan = pengeluaran.reduce((sum, t) => sum + t.total, 0);
+
     return {
       periode,
       periodeTx,
       excludedCount: periodeTx.length - pengeluaran.length,
       totalNominal: pengeluaran.reduce((sum, t) => sum + t.nominal, 0),
       totalBiaya: pengeluaran.reduce((sum, t) => sum + t.biaya, 0),
-      totalKeseluruhan: pengeluaran.reduce((sum, t) => sum + t.total, 0),
-      chartHarian: buildChartHarian(periodeTx, periode),
+      totalKeseluruhan,
+      referensiTotal,
+      deltaPersen: referensiTotal > 0 ? ((totalKeseluruhan - referensiTotal) / referensiTotal) * 100 : null,
+      chartHarian: buildChartHarian(periodeTx, periode, owners),
       chartKategori,
       chartTop5: chartKategori.filter((k) => k.name !== KATEGORI_BELUM).slice(0, 5),
     };
-  }, [transactions, filter]);
+  }, [transactions, filter, owners]);
+
+  // Budget mengikuti rentang gajian (23/24/25) pada bulan periode yang dipilih.
+  const budgetPeriode = useMemo(
+    () => resolvePeriode({ mode: "gajian", bulan: view.periode.bulan, gajian: String(budgetGajian) }),
+    [view.periode.bulan, budgetGajian],
+  );
+  const budgetSpent = useMemo(
+    () =>
+      transactions
+        .filter((t) => inPeriode(t, budgetPeriode) && isPengeluaran(t, owners))
+        .reduce((sum, t) => sum + t.total, 0),
+    [transactions, budgetPeriode, owners],
+  );
+  // Batas aman per hari: sisa budget sebelum hari itu dibagi jumlah hari sampai gajian berikutnya.
+  const budgetAllowance = useMemo(() => {
+    const budget = budgets[budgetPeriode.start];
+    const perTanggal = new Map<string, number>();
+    for (const t of transactions) {
+      if (!inPeriode(t, budgetPeriode) || !isPengeluaran(t, owners)) continue;
+      const tanggal = t.tanggal.slice(0, 10);
+      perTanggal.set(tanggal, (perTanggal.get(tanggal) ?? 0) + t.total);
+    }
+
+    const allowance = new Map<string, number>();
+    if (budget !== undefined) {
+      let terpakai = 0;
+      for (let day = budgetPeriode.start; day < budgetPeriode.end; day = addDays(day, 1)) {
+        const sisaHari = Math.round((Date.parse(budgetPeriode.end) - Date.parse(day)) / 86_400_000);
+        allowance.set(day, Math.max(0, Math.floor((budget - terpakai) / sisaHari)));
+        terpakai += perTanggal.get(day) ?? 0;
+      }
+    }
+
+    const days: (number | null)[] = [];
+    for (let day = view.periode.start; day < view.periode.end; day = addDays(day, 1)) {
+      days.push(allowance.get(day) ?? null);
+    }
+    return days;
+  }, [transactions, budgets, budgetPeriode, owners, view.periode.start, view.periode.end]);
 
   // Elemen dengan referensi stabil dilewati React saat filter periode berubah.
   const bulanChart = useMemo(() => <BulananChart data={chartBulan} />, [chartBulan]);
@@ -90,6 +161,16 @@ export function DashboardView({
         </CardContent>
       </Card>
 
+      <BudgetCard
+        key={budgetPeriode.start}
+        periodeStart={budgetPeriode.start}
+        label={budgetPeriode.label}
+        spent={budgetSpent}
+        budget={budgets[budgetPeriode.start]}
+        gajian={budgetGajian}
+        onGajianChange={setBudgetGajian}
+      />
+
       <p className="text-xs text-slate-500 sm:text-sm">
         Periode {view.periode.label} · {view.periodeTx.length} transaksi
         {view.excludedCount > 0 && ` (${view.excludedCount} transfer/pindah uang tidak dihitung)`} ·{" "}
@@ -105,6 +186,27 @@ export function DashboardView({
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold text-slate-900 sm:text-3xl">{rupiah.format(view.totalKeseluruhan)}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-x-2 text-sm">
+              {view.deltaPersen === null ? (
+                <span className="font-medium text-slate-500">—</span>
+              ) : view.deltaPersen > 0 ? (
+                <span className="inline-flex items-center gap-1 font-medium text-red-600">
+                  <TrendingUp className="size-4" aria-hidden />+{view.deltaPersen.toFixed(1)}%
+                </span>
+              ) : view.deltaPersen < 0 ? (
+                <span className="inline-flex items-center gap-1 font-medium text-green-600">
+                  <TrendingDown className="size-4" aria-hidden />
+                  {view.deltaPersen.toFixed(1)}%
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 font-medium text-slate-500">
+                  <Minus className="size-4" aria-hidden />0%
+                </span>
+              )}
+              <span className="text-slate-500">
+                {REFERENSI_LABEL[filter.mode]} ({rupiah.format(view.referensiTotal)})
+              </span>
+            </div>
           </CardContent>
         </Card>
         <Card>
@@ -129,8 +231,9 @@ export function DashboardView({
         <CardHeader>
           <CardTitle>Pengeluaran Harian & Tren</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <HarianChart {...view.chartHarian} />
+          <HarianTable {...view.chartHarian} allowance={budgetAllowance} />
         </CardContent>
       </Card>
 
